@@ -32,10 +32,60 @@ No secrets are stored in this repo — see "Credentials" below.
 | Flag | Value | Why |
 |---|---|---|
 | `--tensor-parallel-size` | `2` | Split across both GPUs. The GDN linear-attention layer and MLA/DSA-style layers both shard their heads by `tp_size`, so TP=2 is fully supported for this model family. |
-| `--max-model-len` | `131072` | KV cache budget on this box is ~300K+ tokens total; 131072 leaves ~2.5x concurrency headroom while covering long agentic sessions. Model natively supports up to 256K if you want to push further (leaves ~1x concurrency). |
+| `--max-model-len` | `131072` | Model natively supports up to 256K. 131072 was chosen to leave real concurrency headroom rather than maxing out at 1x; see benchmarks below for the actual final KV budget. |
 | `--enable-auto-tool-choice` + `--tool-call-parser qwen3_xml` | | Required for any tool-calling client (`dsh` always sends tool defs). Without this vLLM 400s every request with `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`. `qwen3_xml` is vLLM's parser for this Qwen3.x family. |
-| `--enable-prefix-caching` | | Off by default for this model. `dsh` resends the same system prompt + tool schema every turn, so this reuses cached KV state across turns instead of recomputing it — cuts time-to-first-token on every follow-up message. Confirmed hitting (`Prefix cache hit rate` > 0 in logs) after enabling. |
-| `--gpu-memory-utilization` | `0.96` | Default (0.92) left ~3GB/GPU idle in practice; bumping it grew the KV cache pool from ~302K to ~337K tokens. |
+| `--enable-prefix-caching` + `--prefix-caching-hash-algo xxhash` | | Off by default for this model. `dsh` resends the same system prompt + tool schema every turn; this reuses cached KV state across turns instead of recomputing it. `xxhash` (needs `pip install xxhash` in the vLLM venv) is faster block-hashing than the sha256 default. Confirmed real hits via `curl :8000/metrics | grep prefix_cache` — see "Benchmarking gotcha" below before trusting any prefix-cache test you write yourself. |
+| `--kv-cache-dtype fp8` | | Halves per-token KV cache memory. On this box it nearly doubled the KV budget (302K → 634,971 tokens) *and* measurably sped up decode (56.7 → 76.3 tok/s) since decode is memory-bandwidth bound. Confirmed correct (byte-identical greedy output vs bf16) and confirmed compatible with prefix caching. |
+| `--gpu-memory-utilization` | `0.96` | Default (0.92) left ~3GB/GPU idle in practice; bumping it grew the KV cache pool further. |
+| `--max-num-batched-tokens` | `8192` | Default is 2048 — small chunks force a long prompt (like dsh's ~10K-token system prompt) through many scheduler steps just to prefill. 8192 matches better with the large context/KV budget here. |
+
+### MTP (multi-token prediction) — investigated, not used in the final config
+
+This checkpoint genuinely ships MTP weights (`mtp.layers.0.*`, 1606 tensors
+total incl. MTP — check `model.safetensors.index.json`), and vLLM 0.27.1 has
+a matching `--spec-method qwen3_5_mtp`. It works: `--speculative-config
+'{"method": "qwen3_5_mtp", "num_speculative_tokens": 1}'` gives **+56-60%
+decode throughput** (56.7 → 88-91 tok/s) with byte-identical output under
+greedy decoding (73.8% draft-token acceptance rate, mean acceptance length
+1.74).
+
+**It's not combined with `--kv-cache-dtype fp8` here** — that specific pair
+regresses to 49 tok/s, worse than either flag alone. Root cause not
+diagnosed (didn't have time before the deployment ran out); if revisiting,
+bisect there first. MTP alone (bf16 KV cache) is a legitimate choice if raw
+decode speed matters more than the fp8 KV budget/speed bump — see
+`logs/vllm_serve_final.log` and the git history of this file for exact
+numbers from that config.
+
+### Benchmarking gotcha: KV cache block size
+
+This model's hybrid mamba/attention layers force an unusually large KV
+cache block size (784 tokens — "attention block size padded to match mamba
+page size" in the boot log). **A prefix-cache test with a shared prefix
+under ~784 tokens will always show zero hits, regardless of whether caching
+actually works.** An early pass here concluded MTP "breaks" prefix caching
+based on exactly this mistake (a ~300-token test prefix); a corrected test
+(3486 tokens, several full blocks) showed prefix caching working under
+every config tested (bf16, fp8, xxhash, and even MTP — just at a lower hit
+rate under MTP). Use `curl :8000/metrics | grep prefix_cache_hits_total`
+for ground truth, not the periodic log line (`Prefix cache hit rate` in the
+10s-interval throughput log resets/misses fast, low-volume test traffic).
+
+### Numbers, for reference
+
+Single-request, temperature=0, 220 completion tokens, same prompt each time:
+
+| Config | Decode speed |
+|---|---|
+| Baseline (bf16, no prefix cache, no MTP) | 56.7 tok/s |
+| + prefix caching + xxhash (bf16) | ~56.7 tok/s (unaffected; wins on TTFT for repeat prefixes, not raw decode) |
+| + `kv-cache-dtype fp8` (this repo's final config) | **76.3 tok/s** |
+| + `qwen3_5_mtp` speculative decoding instead of fp8 | 88-91 tok/s |
+| MTP + fp8 combined | 49.3 tok/s (regression — don't combine) |
+
+KV cache budget (`GPU KV cache size` in the boot log) at `--max-model-len
+131072`: 336,719 tokens without fp8 → **634,971 tokens with fp8** (4.84x
+concurrency headroom at full context length).
 
 ## Exposing it externally
 
@@ -81,3 +131,13 @@ anywhere outside `.credentials.yaml`, rotate it.
 - `http://127.0.0.1:8000/v1` (via a reverse proxy edge, token-authed)
 - Instance IP/port allocation changes if the the target hardware deployment is recreated —
   update `dsh/settings.snippet.yaml` and the curl example above when it does.
+- **This specific deployment was destroyed after this session** — the IP/port
+  above are historical, not live. Recreate the instance and rerun the setup
+  scripts to stand it up again.
+
+## Logs
+
+`logs/vllm_serve_final.log` and `logs/model_download.log` are the actual
+boot/serve and model-download logs from this deployment's final run, kept for
+reference (KV cache sizing, compile timings, route list, etc.). Captured
+right before the instance was torn down.
