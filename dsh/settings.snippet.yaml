@@ -1,0 +1,17 @@
+# Add this under `llm-pi-ai.providers` in $DSH_HOME/settings.yaml (deepseek-harness).
+# Then add QWEN_API_KEY to $DSH_HOME/.credentials.yaml — value is the
+# the target hardware instance's $QWEN_API_KEY (see the target hardware instance page; do not
+# commit the literal value anywhere, including this repo).
+#
+# Update the baseURL's host:port if the the target hardware deployment is recreated (its
+# public IP/port allocation is not stable across deployments).
+
+qwen3-5-27b:
+  apiKeyEnv: QWEN_API_KEY
+  api: openai-completions
+  baseURL: http://127.0.0.1:8000/v1
+  models:
+    - id: Qwen3.8-27B-Uncensored-FP8
+      name: Qwen3.8 27B Uncensored (the target hardware)
+      contextWindow: 131072
+      maxTokens: 8192
