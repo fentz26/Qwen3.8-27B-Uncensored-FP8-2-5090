@@ -1,13 +1,14 @@
 #!/bin/bash
-# Download the model on the instance. huggingface.co was blocked on this
-# instance's network (China route); hf-mirror.com worked as a fallback.
-# Model is gated: the HF account behind $HF_TOKEN must click "Agree and
-# access repository" at https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-FP8
-# before this succeeds.
+# Downloads the model. Model is gated: the HF account behind $HF_TOKEN must
+# click "Agree and access repository" at
+# https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-FP8 before this
+# succeeds.
+#
+# If huggingface.co isn't reachable from your network, set
+# HF_ENDPOINT=https://hf-mirror.com (a common mirror) before running this.
 set -euo pipefail
 
-export HF_ENDPOINT=https://hf-mirror.com
-export HF_HOME=/workspace/.hf_home
+export HF_HOME="${HF_HOME:-/workspace/.hf_home}"
 
 /venv/main/bin/hf auth login --token "${HF_TOKEN:?set HF_TOKEN in the environment, do not hardcode it here}"
 

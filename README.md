@@ -2,7 +2,7 @@
 
 Config and setup notes for serving [`orcarouter/Qwen3.8-27B-Uncensored-FP8`](https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-FP8)
 (Qwen3.5-family, FP8, hybrid linear-attention, 256K native context) via vLLM
-on a rented dual-RTX-5090 the target hardware instance, wired into
+on **2x RTX 5090 (32GB each)**, wired into
 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`)
 as a custom model provider.
 
@@ -10,20 +10,23 @@ No secrets are stored in this repo — see "Credentials" below.
 
 ## Hardware / software
 
-- 2x RTX 5090 (32GB each), the target hardware deployment
+- 2x RTX 5090 (32GB each)
 - torch 2.13.0+cu130
 - vLLM 0.27.1
 - Model: FP8 checkpoint, ~29GB on disk, 256K max context (served at 131072)
 
 ## Setup order
 
-1. `scripts/download-model.sh` — downloads the model via `hf-mirror.com`
-   (huggingface.co was blocked on this instance's network route). The repo
-   is gated; the account behind `HF_TOKEN` must accept its terms on the HF
-   model page first.
-2. `scripts/serve.sh` — launches vLLM.
-3. `scripts/expose-port.sh` — wires it behind the instance's authed a reverse proxy
-   edge so it's reachable from outside the container.
+1. `scripts/download-model.sh` — downloads the model. The repo is gated;
+   the account behind `HF_TOKEN` must accept its terms on the HF model page
+   first. If `huggingface.co` isn't reachable from your network, set
+   `HF_ENDPOINT=https://hf-mirror.com` before running it — a common mirror
+   fallback.
+2. `scripts/serve.sh` — launches vLLM, bound to `0.0.0.0:8000` (so it's
+   reachable at `127.0.0.1:8000` locally by default).
+3. (optional) `supervisor/vllm-qwen.service` — runs it as a proper systemd
+   service instead of a bare background process, so it survives crashes and
+   logs go through `journalctl`. See `supervisor/README.md`.
 4. `dsh/settings.snippet.yaml` — the `dsh` custom-provider config to point
    the harness at the running server.
 
@@ -35,7 +38,7 @@ No secrets are stored in this repo — see "Credentials" below.
 | `--max-model-len` | `131072` | Model natively supports up to 256K. 131072 was chosen to leave real concurrency headroom rather than maxing out at 1x; see benchmarks below for the actual final KV budget. |
 | `--enable-auto-tool-choice` + `--tool-call-parser qwen3_xml` | | Required for any tool-calling client (`dsh` always sends tool defs). Without this vLLM 400s every request with `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`. `qwen3_xml` is vLLM's parser for this Qwen3.x family. |
 | `--enable-prefix-caching` + `--prefix-caching-hash-algo xxhash` | | Off by default for this model. `dsh` resends the same system prompt + tool schema every turn; this reuses cached KV state across turns instead of recomputing it. `xxhash` (needs `pip install xxhash` in the vLLM venv) is faster block-hashing than the sha256 default. Confirmed real hits via `curl :8000/metrics | grep prefix_cache` — see "Benchmarking gotcha" below before trusting any prefix-cache test you write yourself. |
-| `--kv-cache-dtype fp8` | | Halves per-token KV cache memory. On this box it nearly doubled the KV budget (302K → 634,971 tokens) *and* measurably sped up decode (56.7 → 76.3 tok/s) since decode is memory-bandwidth bound. Confirmed correct (byte-identical greedy output vs bf16) and confirmed compatible with prefix caching. |
+| `--kv-cache-dtype fp8` | | Halves per-token KV cache memory. On this hardware it nearly doubled the KV budget (302K → 634,971 tokens) *and* measurably sped up decode (56.7 → 76.3 tok/s) since decode is memory-bandwidth bound. Confirmed correct (byte-identical greedy output vs bf16) and confirmed compatible with prefix caching. |
 | `--gpu-memory-utilization` | `0.96` | Default (0.92) left ~3GB/GPU idle in practice; bumping it grew the KV cache pool further. |
 | `--max-num-batched-tokens` | `8192` | Default is 2048 — small chunks force a long prompt (like dsh's ~10K-token system prompt) through many scheduler steps just to prefill. 8192 matches better with the large context/KV budget here. |
 
@@ -51,11 +54,11 @@ greedy decoding (73.8% draft-token acceptance rate, mean acceptance length
 
 **It's not combined with `--kv-cache-dtype fp8` here** — that specific pair
 regresses to 49 tok/s, worse than either flag alone. Root cause not
-diagnosed (didn't have time before the deployment ran out); if revisiting,
-bisect there first. MTP alone (bf16 KV cache) is a legitimate choice if raw
-decode speed matters more than the fp8 KV budget/speed bump — see
-`logs/vllm_serve_final.log` and the git history of this file for exact
-numbers from that config.
+diagnosed (ran out of time on the target hardware before a deeper
+investigation); if revisiting, bisect there first. MTP alone (bf16 KV
+cache) is a legitimate choice if raw decode speed matters more than the
+fp8 KV budget/speed bump — see `logs/vllm_serve_final.log` and the git
+history of this file for exact numbers from that config.
 
 ### Benchmarking gotcha: KV cache block size
 
@@ -70,6 +73,7 @@ every config tested (bf16, fp8, xxhash, and even MTP — just at a lower hit
 rate under MTP). Use `curl :8000/metrics | grep prefix_cache_hits_total`
 for ground truth, not the periodic log line (`Prefix cache hit rate` in the
 10s-interval throughput log resets/misses fast, low-volume test traffic).
+`scripts/bench.sh` does this correctly.
 
 ### Numbers, for reference
 
@@ -87,21 +91,6 @@ KV cache budget (`GPU KV cache size` in the boot log) at `--max-model-len
 131072`: 336,719 tokens without fp8 → **634,971 tokens with fp8** (4.84x
 concurrency headroom at full context length).
 
-## Exposing it externally
-
-the target hardware external ports are fixed at instance creation — vLLM's own port
-(8000) was never one of them, so it's only reachable inside the container by
-default. `scripts/expose-port.sh` adds a `portal.yaml` entry that puts it
-behind the instance's a reverse proxy edge on the first free "normal" port
-(`container_port=10100` → `public_port=8000` on this particular deployment —
-**check `platform-capabilities | jq '.instance.open_ports'` on a fresh deployment,
-these are not stable across instances**).
-
-Requests need the instance's portal token:
-```
-curl -H "Authorization: Bearer $QWEN_API_KEY" http://$HOST:$PORT/v1/models
-```
-
 ## `dsh` integration
 
 `dsh/settings.snippet.yaml` is the provider block to add under
@@ -112,32 +101,30 @@ defaulted the output cap (`max_tokens`) to the full context window, which
 left no room for the input prompt and every request 400'd with
 `CONTEXT_WINDOW_EXCEEDED`.
 
+By default it points at `http://127.0.0.1:8000/v1` (matches `scripts/serve.sh`
+run on the same host). For a remote deployment, point `baseURL` at your own
+`http://$HOST:$PORT/v1` and put whatever reverse proxy/tunnel/auth you use in
+front — that part is entirely up to your environment, nothing here assumes
+a specific one.
+
 ## Credentials
 
-Nothing here is a secret by itself, but two things this setup depends on
+Nothing here is a secret by itself, but two things this setup can depend on
 are, and neither is committed:
 
-- **the target hardware instance's `$QWEN_API_KEY`** (the a reverse proxy edge auth token) —
-  goes in `$DSH_HOME/.credentials.yaml` as `QWEN_API_KEY`, referenced
-  by env-var name only in `settings.snippet.yaml`.
-- **HF token** used to accept the gated model's terms — never hardcode it;
-  `download-model.sh` reads it from `$HF_TOKEN`.
+- **`HF_TOKEN`** — needed to accept the gated model's terms; never hardcode
+  it, `download-model.sh` reads it from the environment.
+- **`QWEN_API_KEY`** (optional) — only relevant if you put an authenticated
+  proxy in front of vLLM for remote access. Reference it by env-var name in
+  `settings.snippet.yaml`'s `apiKeyEnv`, store the actual value in
+  `$DSH_HOME/.credentials.yaml`. Not needed for a plain local deployment.
 
 If either of these tokens ever ends up in a shared transcript, chat log, or
 anywhere outside `.credentials.yaml`, rotate it.
 
-## Current endpoint (this deployment)
-
-- `http://127.0.0.1:8000/v1` (via a reverse proxy edge, token-authed)
-- Instance IP/port allocation changes if the the target hardware deployment is recreated —
-  update `dsh/settings.snippet.yaml` and the curl example above when it does.
-- **This specific deployment was destroyed after this session** — the IP/port
-  above are historical, not live. Recreate the instance and rerun the setup
-  scripts to stand it up again.
-
 ## Logs
 
-`logs/vllm_serve_final.log` and `logs/model_download.log` are the actual
-boot/serve and model-download logs from this deployment's final run, kept for
-reference (KV cache sizing, compile timings, route list, etc.). Captured
-right before the instance was torn down.
+`logs/vllm_serve_final.log` and `logs/model_download.log` are boot/serve and
+model-download logs from a validated run on the target 2x RTX 5090
+configuration, kept for reference (KV cache sizing, compile timings, route
+list, etc.).

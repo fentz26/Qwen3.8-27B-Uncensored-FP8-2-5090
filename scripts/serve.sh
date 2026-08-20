@@ -1,11 +1,13 @@
 #!/bin/bash
-# Final vLLM launch command for Qwen3.8-27B-Uncensored-FP8 on 2x RTX 5090
-# (the target hardware). Run on the instance itself (after model download, see README.md).
+# Final, validated vLLM launch command for Qwen3.8-27B-Uncensored-FP8 on
+# 2x RTX 5090. Run on the host that has the GPUs (after model download, see
+# README.md). Exact flags are load-bearing — see README.md's "vLLM flags"
+# table and "Numbers" section before changing any of them.
 #
 # `xxhash` must be installed first: /venv/main/bin/pip install xxhash
 set -euo pipefail
 
-export HF_HOME=/workspace/.hf_home
+export HF_HOME="${HF_HOME:-/workspace/.hf_home}"
 
 nohup /venv/main/bin/vllm serve /workspace/models/Qwen3.8-27B-Uncensored-FP8 \
   --tensor-parallel-size 2 \
