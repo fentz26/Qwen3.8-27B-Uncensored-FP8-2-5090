@@ -88,9 +88,34 @@
         "ttft_ms": { "type": ["number", "null"] },
         "itl_ms": { "type": ["number", "null"], "description": "Inter-token latency / TPOT" },
         "e2e_ms": { "type": ["number", "null"] },
-        "vram_mib": { "type": ["number", "null"] },
-        "gpu_util_pct": { "type": ["number", "null"] },
-        "power_w": { "type": ["number", "null"] },
+        "vram_mib": { "type": ["number", "null"],
+          "description": "Summed over PARTICIPATING GPUs only (see gpu_selection), not every GPU on the host." },
+        "gpu_util_pct": { "type": ["number", "null"],
+          "description": "Mean over participating GPUs only." },
+        "power_w": { "type": ["number", "null"],
+          "description": "Summed over participating GPUs only." },
+        "per_gpu": {
+          "type": ["array", "null"],
+          "description": "Per-device detail for participating GPUs.",
+          "items": { "type": "object", "properties": {
+            "index": { "type": "integer", "description": "Physical nvidia-smi index." },
+            "name": { "type": "string" },
+            "vram_mib": { "type": ["number", "null"] },
+            "gpu_util_pct": { "type": ["number", "null"] },
+            "power_w": { "type": ["number", "null"] }
+          } }
+        },
+        "gpu_selection": {
+          "type": ["object", "null"],
+          "description": "Which GPUs the aggregate covers, and how they were chosen.",
+          "properties": {
+            "source": { "enum": ["explicit", "CUDA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES(empty)", "all-host-gpus"] },
+            "indices": { "type": "array", "items": { "type": "integer" },
+              "description": "Physical indices. nvidia-smi ignores CUDA_VISIBLE_DEVICES, so these are physical, not CUDA-remapped." },
+            "host_gpu_count": { "type": "integer",
+              "description": "Total GPUs on the host. If this exceeds len(indices), unrelated GPUs were correctly excluded." }
+          }
+        },
         "draft_accepted": { "type": ["integer", "null"] },
         "draft_drafted": { "type": ["integer", "null"] },
         "draft_acceptance_rate": { "type": ["number", "null"] },

@@ -45,6 +45,46 @@ python3 ../scripts/validate-context.py --url ... --depths 8192,131072,262144
 `validate-context.py` exits non-zero unless recall is perfect — that is the
 gate for claiming a context length.
 
+## GPU metrics and device selection
+
+`nvidia-smi` reports **physical** indices and ignores `CUDA_VISIBLE_DEVICES`, so
+GPU metrics are filtered to the devices actually participating in the run.
+Summing every GPU on the host would over-report a 1-GPU profile on a multi-GPU
+box.
+
+Selection precedence: `--gpus` (or `BENCH_GPUS` / `GPUS` / `GPU` env) →
+`CUDA_VISIBLE_DEVICES` → all host GPUs.
+
+Both are recorded: `metrics.per_gpu` (per-device detail) and
+`metrics.vram_mib` / `gpu_util_pct` / `power_w` (aggregated over the selection
+alone). `metrics.gpu_selection` records the source, the physical indices, and
+the host GPU count — so `host_gpu_count > len(indices)` visibly confirms that
+unrelated GPUs were excluded.
+
+Indices are physical, not CUDA-remapped: with `CUDA_VISIBLE_DEVICES=2,3` the
+artifact records `[2, 3]`, not `[0, 1]`.
+
+These read the **local** host's nvidia-smi. Benchmarking a remote endpoint makes
+them describe the wrong machine; `gpu_selection.source` keeps that auditable.
+
+## Compatibility assumption: `stream_options`
+
+`run.py` sends `stream_options.include_usage` to get server-reported token
+counts. OpenAI, vLLM and llama-server support it; servers that ignore unknown
+fields degrade safely to counting stream chunks (which miscounts when a chunk
+carries several tokens). A server that **rejects** the field fails with an
+explicit message rather than silently falling back — wrong token metrics are
+worse than a failed run.
+
+## Tests
+
+```sh
+python3 -m unittest discover -s bench -p 'test_*.py'
+```
+
+`test_gpu_snapshot.py` covers device selection with synthetic `nvidia-smi`
+output — no GPU needed.
+
 ## Provenance
 
 `run.py` reads these env vars into the artifact. Set them or the result is not

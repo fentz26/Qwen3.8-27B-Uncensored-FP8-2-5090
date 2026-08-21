@@ -50,6 +50,14 @@ def post_stream(url, payload, timeout=600):
 
 def one_request(url, model, messages, max_tokens, temperature):
     """Run a single streaming request; return timing dict."""
+    # COMPATIBILITY ASSUMPTION: the endpoint accepts `stream_options.include_usage`
+    # (OpenAI, vLLM and llama-server all do). It is what yields server-reported
+    # token counts; without it we fall back to counting stream chunks, which
+    # miscounts whenever a chunk carries more than one token.
+    #
+    # Servers that ignore unknown fields degrade safely to that fallback. A server
+    # that *rejects* the field is detected below and fails loudly, because silently
+    # switching to chunk-counting would publish wrong token metrics.
     payload = {
         "model": model,
         "messages": messages,
@@ -72,6 +80,20 @@ def one_request(url, model, messages, max_tokens, temperature):
                     ttft = ts - t0
                 token_times.append(ts)
                 text.append(delta)
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            detail = ""
+        if "stream_options" in detail or "include_usage" in detail:
+            return {"error":
+                    "endpoint rejected `stream_options.include_usage` "
+                    f"(HTTP {e.code}): {detail.strip()}\n"
+                    "This endpoint cannot report server-side token counts. Refusing to "
+                    "fall back to chunk-counting, which would publish wrong token "
+                    "metrics. Use an endpoint that supports stream_options, or record "
+                    "the result as status=failed."}
+        return {"error": f"HTTPError {e.code}: {detail.strip() or e.reason}"}
     except Exception as e:  # noqa: BLE001 - surface, never silently zero-fill
         return {"error": f"{type(e).__name__}: {e}"}
     t_end = time.perf_counter()
@@ -95,23 +117,140 @@ def one_request(url, model, messages, max_tokens, temperature):
     }
 
 
-def gpu_snapshot():
+# --- GPU measurement -------------------------------------------------------
+#
+# nvidia-smi always reports PHYSICAL device indices and ignores
+# CUDA_VISIBLE_DEVICES. The inference server, however, only ever touches the
+# devices it was given. Summing every GPU on the host therefore produces wrong
+# numbers whenever a 1-GPU profile runs on a 2- or 4-GPU box.
+#
+# So: query all GPUs, then keep only the participating ones, and report both
+# per-GPU detail and an aggregate over that subset alone.
+
+GPU_QUERY_FIELDS = ["index", "name", "memory.used", "utilization.gpu", "power.draw", "uuid"]
+
+
+def _num(value):
+    """nvidia-smi emits '[N/A]' / '[Not Supported]' for unsupported sensors."""
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_nvidia_smi_csv(text):
+    """Parse `--query-gpu=<GPU_QUERY_FIELDS> --format=csv,noheader,nounits`."""
+    rows = []
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < len(GPU_QUERY_FIELDS):
+            continue
+        idx = _num(parts[0])
+        if idx is None:
+            continue
+        rows.append({
+            "index": int(idx),
+            "name": parts[1],
+            "vram_mib": _num(parts[2]),
+            "gpu_util_pct": _num(parts[3]),
+            "power_w": _num(parts[4]),
+            "uuid": parts[5],
+        })
+    return rows
+
+
+def resolve_gpu_selection(rows, cuda_visible_devices=None, explicit=None):
+    """
+    Decide which physical GPUs are participating.
+
+    Precedence: explicit selection (--gpus / profile GPU(S)) > CUDA_VISIBLE_DEVICES
+    > all GPUs on the host.
+
+    Accepts physical indices ("0,1") or UUIDs ("GPU-abc,GPU-def"). Mirrors CUDA's
+    rule that an invalid entry truncates the list from that point onward, so the
+    selection here matches what the server actually saw.
+
+    Returns (selected_rows, source_label).
+    """
+    by_index = {r["index"]: r for r in rows}
+    by_uuid = {r["uuid"]: r for r in rows if r.get("uuid")}
+
+    def resolve(spec):
+        picked = []
+        for tok in [t.strip() for t in spec.split(",")]:
+            if not tok:
+                continue
+            if tok in by_uuid:
+                row = by_uuid[tok]
+            else:
+                try:
+                    row = by_index.get(int(tok))
+                except ValueError:
+                    row = None
+            if row is None:
+                break  # CUDA truncates at the first invalid entry
+            if row not in picked:
+                picked.append(row)
+        return picked
+
+    if explicit is not None and str(explicit).strip() != "":
+        return resolve(str(explicit)), "explicit"
+    if cuda_visible_devices is not None:
+        # An empty CUDA_VISIBLE_DEVICES means "no GPUs visible", which is
+        # different from the variable being unset.
+        if cuda_visible_devices.strip() == "":
+            return [], "CUDA_VISIBLE_DEVICES(empty)"
+        return resolve(cuda_visible_devices), "CUDA_VISIBLE_DEVICES"
+    return list(rows), "all-host-gpus"
+
+
+def summarize_gpus(selected):
+    """Aggregate over participating GPUs only. Missing sensors stay None."""
+    if not selected:
+        return {}
+    vram = [g["vram_mib"] for g in selected if g["vram_mib"] is not None]
+    util = [g["gpu_util_pct"] for g in selected if g["gpu_util_pct"] is not None]
+    power = [g["power_w"] for g in selected if g["power_w"] is not None]
+    return {
+        # Backward-compatible aggregate fields, now scoped to the selection.
+        "vram_mib": sum(vram) if vram else None,
+        "gpu_util_pct": (sum(util) / len(util)) if util else None,
+        "power_w": sum(power) if power else None,
+        "per_gpu": [{k: g[k] for k in ("index", "name", "vram_mib", "gpu_util_pct", "power_w")}
+                    for g in selected],
+    }
+
+
+def gpu_snapshot(explicit=None):
+    """
+    Snapshot the participating GPUs.
+
+    NOTE: this reads the LOCAL host's nvidia-smi. If run.py is pointed at a
+    remote endpoint, these numbers describe the wrong machine —
+    `gpu_selection.source` is recorded so that is auditable in the artifact.
+    """
     import subprocess
     try:
         out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,utilization.gpu,power.draw",
+            ["nvidia-smi", f"--query-gpu={','.join(GPU_QUERY_FIELDS)}",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=10).stdout.strip()
-        rows = [[float(x) for x in ln.split(",")] for ln in out.splitlines() if ln.strip()]
-        if not rows:
-            return {}
-        return {
-            "vram_mib": sum(r[0] for r in rows),
-            "gpu_util_pct": sum(r[1] for r in rows) / len(rows),
-            "power_w": sum(r[2] for r in rows),
-        }
+            capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return {}
+    rows = parse_nvidia_smi_csv(out)
+    if not rows:
+        return {}
+    selected, source = resolve_gpu_selection(
+        rows, cuda_visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES"), explicit=explicit)
+    snap = summarize_gpus(selected)
+    snap["gpu_selection"] = {
+        "source": source,
+        "indices": [g["index"] for g in selected],
+        "host_gpu_count": len(rows),
+    }
+    return snap
 
 
 def main():
@@ -128,6 +267,11 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--gpus", default=os.environ.get("BENCH_GPUS") or os.environ.get("GPUS")
+                    or os.environ.get("GPU"),
+                    help="Physical GPU indices or UUIDs participating in this run "
+                         "(e.g. '0' or '2,3'). Defaults to BENCH_GPUS/GPUS/GPU env, "
+                         "then CUDA_VISIBLE_DEVICES, then all host GPUs.")
     ap.add_argument("--note", default="")
     args = ap.parse_args()
 
@@ -159,7 +303,7 @@ def main():
         per_run.append({"wall_s": wall, "results": results, "ok": len(ok),
                         "errors": len(results) - len(ok)})
 
-    gpu = gpu_snapshot()
+    gpu = gpu_snapshot(explicit=args.gpus)
     flat = [r for run in per_run for r in run["results"] if r and "error" not in r]
     errors = sum(run["errors"] for run in per_run)
 
@@ -214,6 +358,8 @@ def main():
             "e2e_ms": round(med("e2e_s") * 1000, 2) if med("e2e_s") else None,
             "vram_mib": gpu.get("vram_mib"), "gpu_util_pct": gpu.get("gpu_util_pct"),
             "power_w": gpu.get("power_w"),
+            "per_gpu": gpu.get("per_gpu"),
+            "gpu_selection": gpu.get("gpu_selection"),
             "draft_accepted": None, "draft_drafted": None,
             "draft_acceptance_rate": None, "mean_acceptance_length": None,
             "_spec_note": "acceptance metrics need parsers/llamacpp.py — see docs/dflash.md",

@@ -42,7 +42,8 @@ SHA** (never "latest") · model id + SHA256 + quant + **lineage** · draft id +
 SHA256 + quant · context size **and** measured depth · KV types · split mode ·
 tensor split · batch/ubatch · parallel slots · concurrency · speculation config
 · warmup + measured run counts · whether results are single-stream or aggregate
-· correctness notes.
+· correctness notes · which GPUs participated (`metrics.gpu_selection`, filled
+automatically — check `indices` matches the profile you ran).
 
 Validate before submitting:
 ```sh
