@@ -15,7 +15,10 @@ CUDA="$(nvcc --version 2>/dev/null | grep -o 'release [0-9.]*' | cut -d' ' -f2)"
 
 # P2P matters enormously for tensor split. Absent NVLink on consumer 5090s,
 # this is frequently unavailable — which is a REASON NOT to use Profile D.
-P2P_READ="$(nvidia-smi topo -p2p r 2>/dev/null | grep -c 'OK' || echo 0)"
+# Parse ONLY the matrix rows. `nvidia-smi topo -p2p r` prints a legend
+# containing the literal "OK   = Status Ok", so a naive grep -c 'OK'
+# reports P2P as supported on machines that have none.
+P2P_READ="$(nvidia-smi topo -p2p r 2>/dev/null | grep -E '^[[:space:]]*GPU[0-9]' | grep -c 'OK' || echo 0)"
 P2P_SUPPORTED=false
 [ "${P2P_READ:-0}" -gt 0 ] && P2P_SUPPORTED=true
 

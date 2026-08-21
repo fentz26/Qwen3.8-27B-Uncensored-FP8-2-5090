@@ -18,7 +18,10 @@ for mode in r w p; do
 done
 
 GPU_COUNT="$(nvidia-smi --list-gpus 2>/dev/null | wc -l | tr -d ' ')"
-P2P_OK="$(nvidia-smi topo -p2p r 2>/dev/null | grep -c 'OK' || echo 0)"
+# Parse ONLY the matrix rows. `nvidia-smi topo -p2p r` prints a legend
+# containing the literal "OK   = Status Ok", so a naive grep -c 'OK'
+# reports P2P as supported on machines that have none.
+P2P_OK="$(nvidia-smi topo -p2p r 2>/dev/null | grep -E '^[[:space:]]*GPU[0-9]' | grep -c 'OK' || echo 0)"
 
 echo; echo "=============== Recommended benchmark order ==============="
 case "$GPU_COUNT" in

@@ -11,8 +11,12 @@ What stock Qwen3.8 plus a matching DFlash draft can do. This is the honest
 apples-to-apples target for upstream comparison.
 
 * Target: [`unsloth/Qwen3.8-27B-GGUF`](https://hf.co/unsloth/Qwen3.8-27B-GGUF) — **verified present 2026-08-20**
-  * `Qwen3.8-27B-UD-Q4_K_XL.gguf` — 17,559,178,144 B (~17.6 GB), confirmed
-  * Q5/Q6 variants referenced in the spec: verify filenames before scripting them
+  * `Qwen3.8-27B-UD-Q4_K_XL.gguf` — 17,559,178,144 B (~17.6 GB)
+  * `Qwen3.8-27B-UD-Q5_K_XL.gguf` — 20,876,938,144 B (~20.9 GB)
+  * `Qwen3.8-27B-UD-Q6_K_XL.gguf` — 25,299,061,664 B (~25.3 GB)
+  * (repo also carries Q5_K_M/Q5_K_S and Q6_K/Q6_K_L/Q6_K_M)
+  * all three filenames above verified present on the Hub 2026-08-21 — these are
+    the exact names `profiles/*.env` reference
   * Alternative used by DFlash upstream's own eval: [`ggml-org/Qwen3.8-27B-GGUF`](https://hf.co/ggml-org/Qwen3.8-27B-GGUF)
 * Draft: [`incoai/Qwen3.8-27B-DFlash2-GGUF`](https://hf.co/incoai/Qwen3.8-27B-DFlash2-GGUF)
   (mirror: [`z-lab/`](https://hf.co/z-lab/Qwen3.8-27B-DFlash2-GGUF)) — **verified present**

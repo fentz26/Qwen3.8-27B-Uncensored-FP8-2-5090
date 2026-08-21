@@ -74,8 +74,12 @@ python3 bench/run.py --url http://127.0.0.1:9000 \
 
 ## Things this repo learned the hard way
 
-**DFlash2 is not in llama.cpp master.** It is [PR #27342](https://github.com/ggml-org/llama.cpp/pull/27342),
-open and unmerged as of 2026-08-20. Build master and every DFlash profile fails.
+**DFlash2 is not in llama.cpp master — but the flags are.** `--spec-type
+draft-dflash` is valid on master (DFlash v1). What master lacks is **DFlash2**
+([PR #27342](https://github.com/ggml-org/llama.cpp/pull/27342), open as of
+2026-08-21), which adds new tensors. So on master the flags parse and failure
+shows up at *model load*, not as an unknown-argument error — a much more
+confusing symptom. Build the PR branch.
 
 **A stock GGUF is not an uncensored model.** Track A (stock Qwen3.8) and
 Track B (abliterated) are separate, and results carry a `lineage` field.

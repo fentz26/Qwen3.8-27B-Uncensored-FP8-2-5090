@@ -24,11 +24,23 @@ preflight() {
   if [ -n "${DRAFT_MODEL:-}" ] && [ ! -f "$DRAFT_MODEL" ]; then
     echo "DRAFT_MODEL not found: $DRAFT_MODEL" >&2; exit 1
   fi
-  # DFlash lives in an unmerged PR; fail loudly rather than mid-benchmark.
-  if [ -n "${DRAFT_MODEL:-}" ] && ! "$LLAMA_SERVER" --help 2>&1 | grep -q -- '--spec-type'; then
-    echo "ERROR: this llama-server has no --spec-type flag." >&2
-    echo "DFlash2 requires PR #27342 (unmerged). See engines/llamacpp/build.sh." >&2
-    exit 1
+  # NOTE: --spec-type EXISTS on llama.cpp master (DFlash v1), so its presence
+  # does NOT prove DFlash2 support. DFlash2 is PR #27342 and adds new tensors;
+  # on master a DFlash2 checkpoint fails at model load, not at flag parse.
+  # This check therefore catches only the crude case (a binary with no
+  # speculative support at all) and warns otherwise. It cannot fully verify
+  # DFlash2 — record your build SHA and confirm the draft actually loads.
+  if [ -n "${DRAFT_MODEL:-}" ]; then
+    if ! "$LLAMA_SERVER" --help 2>&1 | grep -q -- '--spec-type'; then
+      echo "ERROR: this llama-server has no --spec-type flag at all." >&2
+      echo "Build via engines/llamacpp/build.sh." >&2
+      exit 1
+    fi
+    if [ "${SPEC_TYPE:-draft-dflash}" = "draft-dflash" ] && [ "${SKIP_DFLASH2_WARN:-0}" != "1" ]; then
+      echo "NOTE: using a DFlash2 draft requires llama.cpp PR #27342." >&2
+      echo "      --spec-type alone does not prove DFlash2 support (master has DFlash v1)." >&2
+      echo "      If the draft fails to load, that is the cause. SKIP_DFLASH2_WARN=1 to silence." >&2
+    fi
   fi
 }
 

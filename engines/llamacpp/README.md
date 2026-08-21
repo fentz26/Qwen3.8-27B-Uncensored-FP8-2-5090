@@ -5,11 +5,18 @@ has been produced on hardware.
 
 ## Blocking prerequisite
 
-DFlash2 is **not in llama.cpp master**. It lives in
-[PR #27342](https://github.com/ggml-org/llama.cpp/pull/27342) (branch `dflash2`),
-**OPEN / unmerged as of 2026-08-20**. `--spec-type draft-dflash` does not exist
-on master. `build.sh` fetches the PR branch by default; `_common.sh` refuses to
-launch a DFlash profile against a binary lacking the flag.
+**DFlash2** is not in llama.cpp master — though the *flags* are. `--spec-type
+draft-dflash` is valid on master (that's DFlash v1), as are
+`--spec-draft-n-max`, `--spec-draft-device`, `--spec-draft-ngl`.
+
+What master lacks is DFlash2 itself: [PR #27342](https://github.com/ggml-org/llama.cpp/pull/27342)
+(branch `dflash2`), **OPEN / unmerged as of 2026-08-21**, which adds the
+convolution and selector tensors the DFlash2 checkpoints need.
+
+Because the flags parse either way, a DFlash2 draft on master fails at **model
+load**, not with a clean argument error. `build.sh` fetches the PR branch by
+default; `_common.sh` warns but cannot fully verify DFlash2 — the build SHA is
+the real evidence.
 
 Re-check: `gh pr view 27342 --repo ggml-org/llama.cpp --json state,mergedAt`
 

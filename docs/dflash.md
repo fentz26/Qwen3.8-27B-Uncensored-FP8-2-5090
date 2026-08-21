@@ -1,18 +1,31 @@
 # DFlash / DFlash2 — speculative decoding
 
-## Blocking constraint: DFlash2 is not in llama.cpp master
+## Blocking constraint: DFlash**2** is not in llama.cpp master
 
-Verified 2026-08-20:
+Verified against upstream source 2026-08-21. Be precise about what is and is
+not on master, because the distinction determines how failure presents.
 
-* PR [ggml-org/llama.cpp#27342](https://github.com/ggml-org/llama.cpp/pull/27342)
-  — *"spec : add DFlash2 support (local convolution + candidate selector)"*,
-  branch `dflash2` — **state: OPEN, not merged.**
+**On master already:**
 
-Consequences:
+* `--spec-type` is a real flag, and `draft-dflash` is a valid value — the type
+  table lists `draft-simple`, `draft-mtp`, `draft-dflash`, `draft-dspark`.
+* `--spec-draft-n-max`, `--spec-draft-device` (`-devd`), `--spec-draft-ngl`
+  (`-ngld`), `-md` and `-sm tensor` all exist on master too.
 
-* `--spec-type draft-dflash` **does not exist on master.** Building master and
-  running any DFlash profile here fails at startup (`_common.sh` checks for the
-  flag and exits with a clear message rather than failing mid-benchmark).
+**Not on master:**
+
+* **DFlash2** — the local-convolution + candidate-selector variant, which is
+  what the checkpoints this repo downloads actually are. That is PR
+  [ggml-org/llama.cpp#27342](https://github.com/ggml-org/llama.cpp/pull/27342)
+  (branch `dflash2`), **state: OPEN, unmerged.** It adds new tensors:
+  `attn_conv_base` / `attn_conv_proj`, `ffn_conv_base` / `ffn_conv_proj`,
+  `selector_predecessor` / `selector_successor` / `selector_hidden`.
+
+**Consequence for debugging:** on master the flags parse fine, so a DFlash2
+draft fails at *model load* or drafts incorrectly — you will not get a clean
+"unknown argument" error. `_common.sh` warns about this but cannot fully detect
+it; only the build SHA tells you for certain.
+
 * `engines/llamacpp/build.sh` fetches the PR branch by default.
 * Every DFlash result **must** record the PR number and the exact build SHA.
   A future rebase of that branch can change performance.

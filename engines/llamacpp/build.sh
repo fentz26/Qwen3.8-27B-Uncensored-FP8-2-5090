@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # Build llama.cpp for RTX 5090 (Blackwell, SM120) with DFlash2 speculative decoding.
 #
-# IMPORTANT — DFlash2 is NOT in llama.cpp master.
-# As of 2026-08-20, DFlash2 support lives in an UNMERGED pull request:
-#   https://github.com/ggml-org/llama.cpp/pull/27342  ("spec : add DFlash2
-#   support (local convolution + candidate selector)", branch `dflash2`, state: OPEN)
-# The `--spec-type draft-dflash` flag does not exist on master. If you build
-# master, every DFlash profile in this repo will fail to start.
+# IMPORTANT — read this before building master.
+#
+# llama.cpp master ALREADY supports DFlash v1: `--spec-type draft-dflash` is a
+# valid flag there (alongside draft-simple / draft-mtp / draft-dspark), and
+# --spec-draft-n-max / --spec-draft-device / --spec-draft-ngl all exist.
+#
+# What master does NOT have is **DFlash2** — the local-convolution + candidate
+# selector variant used by the DFlash2 checkpoints this repo downloads. That is
+# an UNMERGED pull request (verified OPEN 2026-08-21):
+#   https://github.com/ggml-org/llama.cpp/pull/27342  (branch `dflash2`)
+# It adds new tensors (attn_conv_base/proj, ffn_conv_base/proj,
+# selector_predecessor/successor/hidden).
+#
+# Practical consequence: on master the FLAG PARSES, so failure appears at model
+# load or as degraded/incorrect drafting — not as a clean "unknown argument"
+# error. Build the PR branch for DFlash2 checkpoints.
 #
 # Re-check before building: `gh pr view 27342 --repo ggml-org/llama.cpp --json state`
 # If it has merged, set LLAMACPP_REF to a master commit instead and record that
