@@ -1,0 +1,10 @@
+{
+  "name": "json_tool_call",
+  "note": "HIGHEST expected acceptance - rigid schema. Also exercises tool calling.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Emit a JSON array of 20 objects. Each has: id (int), name (string), email (string), role (one of admin/user/guest), active (bool), created_at (ISO8601). Output only JSON."
+    }
+  ]
+}

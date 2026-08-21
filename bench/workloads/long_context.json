@@ -1,0 +1,10 @@
+{
+  "name": "long_context",
+  "note": "Placeholder. Do NOT use directly - generate at a target depth with context/needle.py, which controls actual prompt tokens. -c on the server is capacity, not depth.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "See bench/context/needle.py --depth"
+    }
+  ]
+}

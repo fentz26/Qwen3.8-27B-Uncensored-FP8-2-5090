@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Qwen3.8-27B RTX 5090 benchmark result",
+  "type": "object",
+  "required": [
+    "schema_version", "hardware", "engine", "model", "runtime", "metrics", "aggregate", "status"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "status": {
+      "enum": ["measured", "UNTESTED", "failed"],
+      "description": "Only 'measured' may be cited as a result. UNTESTED is a placeholder."
+    },
+    "aggregate": {
+      "type": "boolean",
+      "description": "true = summed across concurrent independent requests (Metric B). false = single-stream (Metric A). Never present aggregate numbers as single-request speed."
+    },
+    "hardware": {
+      "type": "object",
+      "required": ["gpu", "gpu_count", "driver", "cuda", "p2p_supported"],
+      "properties": {
+        "gpu": { "type": "string" },
+        "gpu_count": { "type": "integer" },
+        "vram_per_gpu": { "type": "string" },
+        "driver": { "type": "string" },
+        "cuda": { "type": "string" },
+        "p2p_supported": { "type": "boolean" },
+        "pcie_topology": { "type": "string" },
+        "host": { "type": "string" },
+        "cpu": { "type": "string" }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "required": ["name", "version_or_commit"],
+      "properties": {
+        "name": { "enum": ["llama.cpp", "vllm", "sglang", "other"] },
+        "version_or_commit": { "type": "string", "description": "Exact SHA for llama.cpp. Never 'latest'." },
+        "dflash_pr": { "type": ["integer", "null"] },
+        "build_flags": { "type": "string" }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["id", "quant"],
+      "properties": {
+        "id": { "type": "string" },
+        "sha256": { "type": ["string", "null"] },
+        "quant": { "type": "string" },
+        "lineage": {
+          "enum": ["stock", "abliterated", "requantized-from-fp8", "unknown"],
+          "description": "See docs/model-lineage.md. A stock GGUF must never be labelled uncensored."
+        },
+        "draft_model": { "type": ["string", "null"] },
+        "draft_sha256": { "type": ["string", "null"] },
+        "draft_quant": { "type": ["string", "null"] }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["context_size", "context_depth", "kv_k", "kv_v"],
+      "properties": {
+        "profile": { "type": "string" },
+        "context_size": { "type": "integer" },
+        "context_depth": { "type": "integer", "description": "Actual tokens in the prompt, NOT the -c value." },
+        "kv_k": { "type": "string" },
+        "kv_v": { "type": "string" },
+        "split_mode": { "enum": ["none", "layer", "tensor", "replicas"] },
+        "tensor_split": { "type": ["string", "null"] },
+        "batch": { "type": ["integer", "null"] },
+        "ubatch": { "type": ["integer", "null"] },
+        "parallel_slots": { "type": ["integer", "null"] },
+        "concurrency": { "type": "integer" },
+        "speculation": {
+          "type": "object",
+          "properties": {
+            "type": { "enum": ["none", "dflash", "dflash2", "mtp", "draft-model"] },
+            "n_max": { "type": ["integer", "null"] }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "decode_tps": { "type": ["number", "null"] },
+        "prompt_tps": { "type": ["number", "null"] },
+        "ttft_ms": { "type": ["number", "null"] },
+        "itl_ms": { "type": ["number", "null"], "description": "Inter-token latency / TPOT" },
+        "e2e_ms": { "type": ["number", "null"] },
+        "vram_mib": { "type": ["number", "null"] },
+        "gpu_util_pct": { "type": ["number", "null"] },
+        "power_w": { "type": ["number", "null"] },
+        "draft_accepted": { "type": ["integer", "null"] },
+        "draft_drafted": { "type": ["integer", "null"] },
+        "draft_acceptance_rate": { "type": ["number", "null"] },
+        "mean_acceptance_length": { "type": ["number", "null"] },
+        "errors": { "type": ["integer", "null"] }
+      }
+    },
+    "correctness": {
+      "type": "object",
+      "properties": {
+        "greedy_match_vs_no_spec": { "type": ["boolean", "null"],
+          "description": "DFlash2 claims lossless greedy decoding. Verify it." },
+        "tool_call_ok": { "type": ["boolean", "null"] },
+        "needle_recall": { "type": ["number", "null"] },
+        "notes": { "type": "string" }
+      }
+    },
+    "workload": { "type": "string" },
+    "warmup_runs": { "type": "integer" },
+    "measured_runs": { "type": "integer" },
+    "raw": { "type": "object" }
+  }
+}

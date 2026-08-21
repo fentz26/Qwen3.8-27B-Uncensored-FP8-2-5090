@@ -1,0 +1,10 @@
+{
+  "name": "creative",
+  "note": "LOW expected acceptance - high entropy. Expected worst case for DFlash.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write an original short story about a lighthouse keeper who discovers the light is answering something. Literary, unpredictable, ~800 words."
+    }
+  ]
+}

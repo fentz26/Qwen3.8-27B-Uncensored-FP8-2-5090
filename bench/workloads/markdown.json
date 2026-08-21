@@ -1,0 +1,10 @@
+{
+  "name": "markdown",
+  "note": "MEDIUM expected acceptance",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write technical documentation in Markdown for a REST API with five endpoints, including request/response examples, auth notes, and a status-code table."
+    }
+  ]
+}

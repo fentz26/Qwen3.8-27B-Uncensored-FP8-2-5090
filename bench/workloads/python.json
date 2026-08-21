@@ -1,0 +1,10 @@
+{
+  "name": "python",
+  "note": "HIGH expected acceptance - code is highly predictable",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write a Python module implementing an LRU cache with a decorator API, type hints, docstrings, thread safety, and pytest unit tests. Output only code."
+    }
+  ]
+}

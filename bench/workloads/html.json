@@ -1,0 +1,10 @@
+{
+  "name": "html",
+  "note": "HIGH expected acceptance - highly structured, low entropy",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write a complete standalone HTML5 page for a product pricing table with three tiers (Free, Pro, Enterprise), inline CSS, semantic markup, and a responsive grid. Output only HTML."
+    }
+  ]
+}

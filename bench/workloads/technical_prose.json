@@ -1,0 +1,10 @@
+{
+  "name": "technical_prose",
+  "note": "MEDIUM expected acceptance",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Explain how speculative decoding works in LLM inference: drafting, verification, acceptance, and why acceptance rate governs the speedup. ~600 words, no markdown."
+    }
+  ]
+}
