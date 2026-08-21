@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.gguf
+build/
+build-info.json
+docs/findings-generated.md
